@@ -1,0 +1,213 @@
+---
+title: "HW3"
+author: "Xilong Li (3467966)"
+date: '2022-04-18'
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+#Note: ALL of the codes in this homework are cited from lab03!
+
+library(tidyverse)
+library(tidymodels)
+library(discrim)
+library(poissonreg)
+library(corrr)
+library(klaR) # for naive bayes
+
+tidymodels_prefer()
+Titanic <- read.csv("titanic.csv")
+Titanic$survived <- as.factor(Titanic$survived)
+Titanic$pclass <- as.character(Titanic$pclass)
+Titanic$pclass <- as.factor(Titanic$pclass)
+
+head(Titanic)
+```
+
+
+## Question 1:
+```{r}
+set.seed(2216)
+
+titan_split <- initial_split(Titanic, prop = 0.80,
+                                strata = survived)
+titan_train <- training(titan_split)
+titan_test <- testing(titan_split)
+c(nrow(titan_train),nrow(titan_test),nrow(Titanic))
+
+head(titan_train)
+sum(is.na(titan_train$survived))
+```
+Therefore, as I have checked, there are no missing data on the column of "survived" in the training data, while there are indeed some missing data in other columns of the training data.       
+It is important to use stratified sampling in this data, because the result we want to predict is categorical parameter. Therefore, we need also to proportionally split the data based on the stratification.        
+We can also notice a possible problem which is that the column "ticket" has very untidy values, which might cause a problem during the training.
+
+## Question 2:
+```{r}
+titan_train %>%
+  ggplot(aes(x = survived)) +
+  geom_bar()
+```
+Therefore, as the graph above has shown, in the training data, there are more people who did not survive than those who did survive.
+
+## Question 3:
+```{r}
+library(corrplot)
+#install.packages("corrr")
+library(corrr)
+
+cor_titan <- titan_train %>% 
+  select (-c(survived,pclass,sex,embarked,name,ticket,cabin)) %>% 
+  correlate()
+rplot(cor_titan)
+
+
+cor_titan %>%
+  stretch() %>%
+  ggplot(aes(x, y, fill = r)) +
+  geom_tile() +
+  geom_text(aes(label = as.character(fashion(r))))
+```
+As the graph shown above:       
+1) age has negative correlation with sib_sp;
+2) age has slightly negative correlation with parch;
+3) sib_sp has positive correlation with parch;
+4) sib_sp has slightly positive correlation with fare;
+5) parch has slightly positive correlation with fare;
+
+## Question 4:
+```{r}
+titan_recipe <- recipe(survived ~ 
+                         pclass +
+                         sex + 
+                         age + 
+                         sib_sp + 
+                         parch + 
+                         fare,
+                       data = titan_train) %>% 
+  step_impute_linear(age) %>% 
+  step_dummy(all_nominal_predictors()) %>% 
+  step_interact(~ starts_with("sex"):fare) %>% 
+  step_interact(~ age:fare)
+  
+titan_recipe
+```
+
+## Question 5:
+```{r}
+log_reg <- logistic_reg() %>% 
+  set_engine("glm") %>% 
+  set_mode("classification")
+
+log_wkflow <- workflow() %>% 
+  add_model(log_reg) %>% 
+  add_recipe(titan_recipe)
+
+log_fit <- fit(log_wkflow, titan_train)
+
+```
+
+## Question 6:
+```{r}
+lda_mod <- discrim_linear() %>% 
+  set_mode("classification") %>% 
+  set_engine("MASS")
+
+lda_wkflow <- workflow() %>% 
+  add_model(lda_mod) %>% 
+  add_recipe(titan_recipe)
+
+lda_fit <- fit(lda_wkflow, titan_train)
+```
+
+## Question 7:
+```{r}
+qda_mod <- discrim_quad() %>% 
+  set_mode("classification") %>% 
+  set_engine("MASS")
+
+qda_wkflow <- workflow() %>% 
+  add_model(qda_mod) %>% 
+  add_recipe(titan_recipe)
+
+qda_fit <- fit(qda_wkflow, titan_train)
+```
+
+## Question 8:
+```{r}
+nb_mod <- naive_Bayes() %>% 
+  set_mode("classification") %>% 
+  set_engine("klaR") %>% 
+  set_args(usekernel = FALSE) 
+
+nb_wkflow <- workflow() %>% 
+  add_model(nb_mod) %>% 
+  add_recipe(titan_recipe)
+
+nb_fit <- fit(nb_wkflow, titan_train)
+```
+
+## Question 9:
+```{r, warning = FALSE}
+# calculating the prediction accuracy of each model:
+head(predict(log_fit, new_data = titan_train, type = "prob"))
+log_reg_acc <- augment(log_fit, new_data = titan_train) %>%
+  accuracy(truth = survived, estimate = .pred_class)
+augment(log_fit, new_data = titan_train) %>%
+  conf_mat(truth = survived, estimate = .pred_class)
+
+head(predict(lda_fit, new_data = titan_train, type = "prob"))
+lda_acc <- augment(lda_fit, new_data = titan_train) %>%
+  accuracy(truth = survived, estimate = .pred_class)
+augment(log_fit, new_data = titan_train) %>%
+  conf_mat(truth = survived, estimate = .pred_class) 
+
+head(predict(qda_fit, new_data = titan_train, type = "prob"))
+qda_acc <- augment(qda_fit, new_data = titan_train) %>%
+  accuracy(truth = survived, estimate = .pred_class)
+augment(log_fit, new_data = titan_train) %>%
+  conf_mat(truth = survived, estimate = .pred_class) 
+
+head(predict(nb_fit, new_data = titan_train, type = "prob"))
+nb_acc <- augment(nb_fit, new_data = titan_train) %>%
+  accuracy(truth = survived, estimate = .pred_class)
+augment(log_fit, new_data = titan_train) %>%
+  conf_mat(truth = survived, estimate = .pred_class) 
+```
+
+```{r}
+# Summarizing the accuracy of each model:
+
+accuracies <- c(log_reg_acc$.estimate, lda_acc$.estimate, 
+                nb_acc$.estimate, qda_acc$.estimate)
+models <- c("Logistic Regression", "LDA", "Naive Bayes", "QDA")
+results <- tibble(accuracies = accuracies, models = models)
+results %>% 
+  arrange(-accuracies)
+```
+Therefore, as it is shown above, the logistic regression model has the highest accuracy, and thus I will choose the logistic regression model as the best prediction.
+
+
+## Question 10:
+```{r}
+predict(log_fit, new_data = titan_test, type = "prob")
+
+augment(log_fit, new_data = titan_test) %>%
+  conf_mat(truth = survived, estimate = .pred_class) 
+
+multi_metric <- metric_set(accuracy, sensitivity, specificity)
+
+augment(log_fit, new_data = titan_test) %>%
+  multi_metric(truth = survived, estimate = .pred_class)
+
+augment(log_fit, new_data = titan_test) %>%
+  roc_curve(survived, .pred_No) %>%
+  autoplot()
+```
+
