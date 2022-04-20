@@ -4,6 +4,7 @@ author: "Xilong Li (3467966)"
 date: '2022-04-18'
 output:
   pdf_document: default
+  word_document: default
   html_document: default
 ---
 
@@ -210,4 +211,5 @@ augment(log_fit, new_data = titan_test) %>%
   roc_curve(survived, .pred_No) %>%
   autoplot()
 ```
-
+    
+As the result shown above, the ROC curve shows that the logistic regression model fits relatively well with high accuracies.
